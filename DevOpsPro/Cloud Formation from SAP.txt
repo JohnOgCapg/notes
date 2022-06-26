@@ -1,0 +1,453 @@
+17	Infra as code (associate refresh)
+17.1	CloudFormation
+•	Check deletion policies are retain or snap for S3 and RDS
+•	Check for correct create policy + CFN HUP & Signal for external resources & boot strapping
+•	Conditions have their own section
+
+CF begins with YAML or JSON template & this lists out logical resources 
+You state WHAT & CF manages HOW 
+Each template can be used in many regions / accounts 
+ 
+Each logical resource turns into a physical one when applies 
+If template updated/reapplied then the physical ones get updated too 
+ 
+Can zap the stack & that zaps the physical resources (can keep things like databases) 
+ 
+Stack = a provisioned template 
+
+17.1.1	Non portable demo
+This demo is bad practice to tee up better practice later 
+ 
+Creates an S3 bucket and an EC2 instance 
+Latter requires a keypair created called A4L in OpenSSH format if pos (ie PEM not Putty) 
+ 
+Go into Cf and create a template from scratch in vsCode 
+ 
+Resources: 
+  Bucket: 
+    Type: 'AWS::S3::Bucket' 
+    Properties: 
+      BucketName: 'accatpics13333337' 
+  Instance: 
+    Type: 'AWS::EC2::Instance' 
+    Properties: 
+      KeyName: 'A4L' 
+      InstanceType: ' t2.micro' 
+      ImageId: 'ami-876349564399436596435'       //64 bit x86 amazon linux2 in us-east-1 
+ 
+Save that & apply as a stack 
+Wait to be applied (should fail) 
+Bucket name won't be globally unique // check in the events menus of the stack 
+So : delete the stack & return to the code editor 
+Make the bucket name is unique & it should then apply 
+ 
+ 
+Create another stack using same template & different name & should also fail cos bucket name is again in use 
+Delete both stacks 
+Could now run the stack again & it should work 
+ 
+Zap that stack 
+Apply the stack in a different region & should fail cos the AMI isnt in that region 
+ 
+17.1.2	 Using templates and parameters
+Template Parameters 
+Allow input from external sources, ie whoever is provisioning the stack 
+Use to capture things like names, instance sizes, keys ->see many examples in course scripts 
+ 
+Can also provide: 
+•	Defaults 
+•	Allowed values 
+•	Min & max 
+•	Allowed patterns 
+•	Data type 
+•	No echo (password fields) 
+•	Pre-pop details (including making region specific) 
+•	Description saying what it does 
+ 
+Psuedo parameters 
+Are provided by AWS - and can be referenced by your stack 
+AWS effectively inject in as global statics 
+ 
+Examples 
+•	AWS Region 
+•	StackID 
+•	StackName 
+•	AccountID 
+ 
+Using bucketname + stackID in the bucket name seems a good way to address the previous portability issue with duplicate bucket names preventing bucket creation 
+17.1.3	Intrinsic Functions
+Allow access to data at runtime (stack create time) 
+ 
+Intro some functions 
+•	Ref & getAtt   (reference a value of a resource from elsewhere) 
+•	Join and split (manipulate strings) 
+•	Get Azs and Fn::Select (pick an AZ) 
+•	Conditionals (if, and, equals, not, or) 
+•	Base64 and Sub (for encoding & substitutions) 
+•	Cidr (lets you build cidr blocks) 
+•	ImportValue, FindinMap, Transform 
+ 
+Ref & get Att 
+Create a t3.micro in the stack 
+ 
+Can use !Ref <paramId> to use a parameter 
+ 
+Or !Ref <resource name> to get the ID from a resource 
+ 
+And !GetAttr <resource>.<attribute> to get an attribute of that resource 
+ 
+GetAz and Select 
+GetAz <region> returns a list from that region in which the default VPC has subnets 
+You then use select to get an AZ from it 
+ 
+Join & Split 
+Split takes a string & delimiter and gives you a list back 
+Join takes a list and delimter and give you back a sings string 
+ 
+Base 64  
+Use for encoding things 
+e.g. base 64 encoding the userdata 
+ 
+Sub 
+Does variable replacements - ie you need to do this when passing parameters into userdata 
+Expects one of: 
+•	${parameter} 
+•	${LogicalResource} 
+•	${LogicalResource.AttributeName} 
+ 
+Cant self reference - cant pass instanceID in to the instances userdata cos instance Id isnt yet allocated 
+ 
+CIDR 
+You tell it the parent range, how many you want and the size & it give you back the required blocks 
+Doesn’t allocate them, just gives you blocks back, so you can create your subnets 
+17.1.4	Mappings
+Maps keys to values 
+e.g. AMIs to regions 
+ 
+Can have one key or a top and second level key 
+e.g. AMI to region + architecture 
+ 
+All to improve portability 
+ 
+RegionMap: 
+  use-east-1: 
+      x64: "ami-3498" 
+     graviton: "ami-35868" 
+ 
+!FindInMap [Regionmap, !Ref AWS:Region,x64] 
+ 
+Returns the first one if you don’t include the 2nd level key 
+17.1.5	Outputs
+These are optional 
+They return info back to the provisioner - like here's you ALB's IP and bucket name 
+ 
+Get returned to the UI, the CLI or to a parent stack 
+Can be exported for cross stack references 
+ 
+You give it a name, description and value 
+Value is likely going to be a !GetAtt something.something 
+ 
+Possibly also a join (like https:// !GetAtt myec2.DNSName 
+17.1.6	Demo – Portable Template
+4 phase demo making the template from before (1x instance, 1x s3 bucket) properly portable 
+Issues were: 
+•	its region specific cos hardcoded AMI ID 
+•	Its only one off because bucket name is hardcoded 
+•	Its hardcoded for a specific keypair (A4L) 
+ 
+Actions to sort 
+•	Remove the hardcoded bucket name - let it self name (stack name + resource type + randomness) 
+•	Intro parameters for AMIID (string) and KeyName (AWS:Keypair dropdown)- so users have to specify them 
+•	Intro a map for region + AMI & use find in map !RegionID 
+•	Replace the map with the AWS (SSM parameter store) provided pointer to the latest amazon linux AMI in the selected region - so its always automatically the latest 
+•	Remove the key altogether & assume instance connect will be used instead - so the user doesn’t have to specify it 
+ 
+17.1.7	Conditions
+Allow the stack to  react to stuff 
+Are evaluated to true/false before  anything gets provisioned - are in a separate section 
+Cn use AND, EQUALS, IF, Or, NOT 
+ 
+Only resources with TRUE conditions get created 
+So can include a resource twice with different conditions - e.g ENVType_ISPROD and ENVtype_ISDEV - hang those conditions off an input template parameter 
+ 
+Can nest conditions  
+17.1.8	Dependencies
+Is a way of saying don’t provision this resource until that resource has provisioned 
+ 
+Without this CF tries to do as much stuff in parallel as possible; but knows it has to do VPC before subnet before ec2 
+ 
+Above usually automatic based on any references between resources, but depends on makes it all explicit 
+ 
+Exam hint 
+ElasticIP needs an explicit depends on the attached IGW (there is no reference chain CF can follow to validate this) 
+ 
+Can specify one or a list of resources that DependsOn 
+17.1.9	Wait conditions & Signal
+Completion state might take a long time after boot strapping appears to have completed 
+ 
+Configure CF to hold - wait for a number of seconds upto 12h - waiting for the required cfn_signals to say bootstrapping has finished & if it doesn’t get them, fail the instance/stack 
+ 
+Make sure the bootstrapping script (passed via user data) calls Cfn_signal with success / fail on the create, so that CF knows whether it worked 
+ 
+Things with creation policies (like ASGs) state how many signals they want 
+ 
+ 
+Create policy - ASG - example 
+Some resources have specific create policies integrated with signals 
+ 
+Uses a create policy notes how many instances must be created before proceeding 
+Instances must cfn_signal when they are ready 
+CF waits for 3 success signals 
+Any fails or it timeouts, fail the stack 
+ 
+Wait condition 
+Is more general purpose than create policy - just specify the signal to wait for & timeout 
+ 
+General 
+Use create policy wherever you can 
+Fallback to general wait conditions where need to  
+17.1.10	Nested Stacks
+Allow for a hierarchy of stacks - parent stack pulls in several child stacks 
+ 
+Normal stacks just have everything in it 
+Can make them more modular 
+ 
+Stack has limit of 500 resources 
+Stack resources cant be referenced from outside the stack 
+ 
+Need to know difference between nested and cross stack references 
+ 
+Nested 
+Have a root (parent) stack that is what the user asks to be provisioned 
+Root can then initiate other stacks, which can initiate other stacks…. 
+ 
+Child Stack becomes a logical resource of the parent - you just pass in the TemplateURL, and can pass in parameters 
+Cant references resources inside a nested stack, just the outputs from it 
+Can take outputs from one stack & pass them in as input params to another 
+ 
+Need to be super careful with dependencies between nested stacks 
+ 
+Exam 
+Nested stacks are about modular reuse at the template level 
+You are reusing CODE not RESOURCES 
+So if "create VPC" is nested in several stacks you get several VPC -> unlike cross stack references 
+ 
+So you only use nested when everything has the same lifecycle & you are working around 500 resource limit 
+Use cross stack references when things don’t share lifecycles (ie having a landing zone) 
+ 
+Don’t nest stuff if you want to change stuff independently 
+17.1.11	Cross Stack References
+Use for when lifecycle is different - ie having a VPC used for many stacks where you reuse THE RESOURCES not THE CODE 
+ 
+Normally outputs of a stack are only available via output params - so how to reference things from different lifecycles? 
+ 
+Need to EXPORT stuff with unique export name 
+Typically export reusable stuff like VPC name, security group names, subnet names 
+Then import those references into the next stack - using !importValue 
+Put Export: Name: <whatever> in the outputs section for each output 
+ 
+Doesn’t work cross region or cross account 
+ 
+Use for shared services like VPCs 
+17.1.12	Stack Sets
+Use for cross region and cross account stuff 
+ 
+StackSets are containers applied to an admin account (which then provisions stack instances into whatever target accounts) 
+ 
+Stack instance = container for a stack in a region/account 
+ 
+Provisioning happens via self-managed or service-managed roles 
+ 
+Template for stack set is just a template 
+As part of creation you list target accounts & regions & CF then creates stack instances in each 
+ 
+Usage & terminology 
+Concurrent accounts = how many accounts to deploy into at a time 
+Failure tolerance = how many fails before fail the stack SEt 
+Retain stacks = retain anything on zap in the regions/accounts 
+ 
+Scenarios 
+•	Enabling AWS config rules for MFA, Elastic Ips, EBS encryption 
+•	Create IAM roles for cross account access 
+ 
+17.1.13	Deletion Policy
+Controls what happens when you delete a stack 
+Can define delete policy on each resource in the stack 
+•	Delete (default) 
+•	Retain 
+•	(If supported) snapshot = EBS, Elasticache, Neptune, RDS, Redshift  - snapshot is your responsibility to zap 
+ 
+Stops data loss 
+ 
+But this only applies to DELETE operations – not replace operations 
+Be careful when doing updates that it doesn’t do it as a zap/recreate 
+ 
+Remember: cant snapshot an EC2 instance (just its EBS volumes) 
+17.1.14	Stack Roles
+CF creates resources based on the stack 
+CF needs permissions to create the physical resources 
+By Default: CF borrows the permissions from the logged in user (meaning you need permissions on CF and on the resources) 
+ 
+Stack roles lets CF assume a role to gain permissions the user doesn’t have – user just needs resource permissions; just PassRole (and CFN) 
+ 
+Net result is that admins can create cloudformation templates & grant create/update/delete stack+pass role to an oik.  Oik can then use the template to create whatever they need (without underlying permissions needed to manipulate resources) => self service! 
+ 
+Examp hint 
+When resources need ability to do stuff they don’t have the permissions to do -> use a stack role 
+17.1.15	Helper Scripts 
+17.1.15.1	Signal (already covered previously) 
+Allows a user data bootstrap to signal that its finished creating stuff, so the wait condition can be passed 
+ 
+17.1.15.2	Init (17) 
+Another way to pass config info into EC2 besides user-data to bootstrap 
+ 
+Put config directives in a template 
+Then AWS::CloudFormation::Init part of the logical resource (in meta-data) 
+ 
+Userdata is procedural -> do this do that in a script 
+Init is a desired state "look like this" so is idempotent and works cross platform – stuff like "install apache and start it" 
+ 
+Uses cfn-init helper script which loads the config and applies it (bit like puppet) 
+ 
+Using 
+•	Make the user data a lot simpler – just run update, call cfn init and call signal to wait for init to finish 
+•	In the Creation Policy of the  logical resource, have a metadata section with an AWS::CloudFormation::Init section that lists out the required states - examples 
+o	Install apache 
+o	Install wordpress 
+•	As a result of that userdata, CFN_init script runs, gets its required state and applies them like puppet will 
+ 
+Directives 
+•	Packages (to install) 
+•	Groups (to create) 
+•	Users (to create) 
+•	Sources (to add to download list) 
+•	Files (to create) 
+•	Commands (to exec) 
+•	Services (to enable) 
+ 
+Use config_sets to package all the directives into modules & then exec them 
+ 
+17.1.15.3	HUP (18) 
+CFN_init is only run once at stack deploy 
+ 
+HUP is a daemon that can be installed & run each time you run stack update 
+It can then call cfn init to apply any required changes to required state 
+ 
+HUP is super simple, just rerun INIT when an update stack operation is performed 
+Init then downloads and applies the new configuration 
+ 
+ 
+17.1.15.4	Demo - wait, signal inita and hup (19,20) 
+ 
+Starts with just user data 
+Then use init 
+Then use HUPto support future refreshes 
+ 
+Just user data 
+In user data: 
+•	Yum update & upgrade 
+•	Sleep for 5 mins (pretending to install other stuff 
+ 
+CFN thinks the server is good to go as soon as it passes status checks 
+Ie while those 5 min things are still happening 
+So with this set up the server will/may receive traffic before its ready 
+ 
+Make a change to the HTML passed in via user data 
+Apply the stack 
+This does a stop and starts a new one (so new address & it hasn’t reapplied user data) 
+ 
+Issues 
+•	Doesn’t wait for bootstrapping to complete 
+•	Doesn’t apply user data, even if its changed when you apply an update 
+ 
+With CFN_Init 
+This script moves some stuff into the creation policy & puts in a 5 min timeout 
+Still does the work in user data & last line of user data is calling signal to say ready 
+ 
+This one now takes longer to create cos its waiting for the init to signal 
+ 
+Issues 
+•	Doesn’t apply user data on update – just as before 
+ 
+With Init done properly 
+Exactly as above, but 
+•	Moves the config into desired state into an INIT block (rather than just userdata commands) 
+•	Change user data to run cfn-init then cnf-signal 
+o	Init uses the delcatative desired state 
+o	Cng-signal says "we're ready" which should happen before the create policy times out (and fails the stack) 
+ 
+Issues 
+•	Doesn’t apply user data on update – just as before 
+ 
+With HUP 
+This now means when you update user data is reapplies init, so the resources do get updated 
+ 
+Inside  the desired state: run hup script on cfn updates (also on a cron schedule) 
+Inside the hup config section state reapply the init script 
+ 
+Script is now properly functional 
+ 
+NOW: rather than stop/start the service it just calls HUP to download the new desired state and apply it 
+ 
+17.1.15.5	Log files for CFN init 
+ 
+In /var/logs folder you get log files for  
+•	cfn-init (what desired states)  
+•	cfn-init-cmd (what commands it did)  
+•	cfn-init-output – what it said 
+•	Cfn-hup – what happened on updates 
+17.1.16	Change Sets
+Makes it safer to use CFN with CICD 
+ 
+Usual flow is use stack to create physical resources or to delete or update them -> ie it changes stuff 
+Can flow with: 
+•	No interruption 
+•	Some interruption (like a reboot) 
+•	Replacement (like data-loss) 
+ 
+Change set is like terraform run – so you see what it will do many times 
+Once you are happy with what it's doing you can exec the change for real 
+ 
+Demo 
+Apply a CFN template that creates 3 buckets 
+ 
+Then with/without change sets apply an update that only has 2 
+If apply direct it will zap the 3rd bucket 
+If use change set you get to see it will zap bucket 3 
+ 
+No actual link between change set and the provisioned stack – is a separate bit of resource 
+In the change set can see each instance of the change set (each time you applied a thing in it) 
+And in each instance of the change set you see the changes in this case a delete on bucket 3 
+ 
+Can then hit execute on the change set & it will actually apply it and zap bucket 3 
+17.1.17	Custom Resources
+Logical resources define what you want 
+CFN then uses logical resources to CRUD physical ones 
+ 
+CFN doesn’t support everything in AWS 
+Need to use custom resources for anything CFN doesn’t yet support & external things 
+ 
+Examples 
+•	Delete objects in a bucket 
+•	Pre-create objects in a bucket 
+•	Access external services to prepop EC2 
+•	Create external things 
+ 
+CFN sends event data to the custom resource, like a lambda or SNS & that compute does <whatever> and responds with success/fail to CFN & can also pass info back like URL of thing created 
+ 
+ 
+Note: cant CFN delete buckets if they arent empty (is used!) 
+So use a custom resource in the stack 
+•	Back the custom resource by lambda (so ir runs on CRUD) 
+•	Lambda gets an event with bucket name 
+•	On create: download some stuff to the bucket 
+•	On zap: zap all contents 
+ 
+17.1.18	Demo 
+Realise the above s3 example 
+
+17.1.19	For Exam
+Know (ie practice) which things use references vs intrinsic functions vs dynamic functions
+Know how to do a secrets rotation
+Know how to manipulate things via ARNs & which ARN to use: focus on param store and secrets manager linked to databases
+Know when to use SAM vs CloudFormation
